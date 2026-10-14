@@ -19,6 +19,11 @@ for what those estimates are, and what they are not.
 
 ## Public project scope
 
+Source validation on 15 October 2026: **488 tests passed**, with **three optional
+MLflow tests skipped** because the local MLflow dependency was unavailable.
+These tests validate local contracts and calculations; they do not execute the
+Databricks notebooks or confirm a live endpoint.
+
 This repository contains the notebook source, reusable Python modules, dashboard
 SQL/specifications and local tests for an educational Databricks lakehouse POC.
 The original project documentation records an end-to-end execution on Databricks
