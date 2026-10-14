@@ -1,0 +1,1159 @@
+{
+  "datasets": [
+    {
+      "name": "q1_volume",
+      "displayName": "Q1 · transaction volume",
+      "queryLines": [
+        "SELECT\n",
+        "    w.window_id,\n",
+        "    w.window_index,\n",
+        "    w.start_step,\n",
+        "    w.end_step,\n",
+        "    p.transaction_volume,\n",
+        "    p.total_amount,\n",
+        "    ROUND(p.total_amount / NULLIF(p.transaction_volume, 0), 2) AS avg_transaction_amount,\n",
+        "    w.label_available\n",
+        "FROM workspace.fraud_poc.monitoring_windows          AS w\n",
+        "LEFT JOIN workspace.fraud_poc.monitoring_prediction_drift AS p\n",
+        "       ON p.window_id = w.window_id\n",
+        "ORDER BY w.window_index\n"
+      ]
+    },
+    {
+      "name": "q2_score_histogram",
+      "displayName": "Q2 · fraud-score distribution",
+      "queryLines": [
+        "SELECT\n",
+        "    h.window_id,\n",
+        "    h.window_index,\n",
+        "    h.bucket_index,\n",
+        "    CONCAT(\n",
+        "        LPAD(CAST(CAST(h.bucket_lower * 100 AS INT) AS STRING), 3, '0'), '-',\n",
+        "        LPAD(CAST(CAST(h.bucket_upper * 100 AS INT) AS STRING), 3, '0'), '%'\n",
+        "    )                                    AS score_band,\n",
+        "    h.row_count,\n",
+        "    h.row_share\n",
+        "FROM workspace.fraud_poc.monitoring_score_histogram AS h\n",
+        "WHERE h.row_count > 0\n",
+        "ORDER BY h.window_index, h.bucket_index\n"
+      ]
+    },
+    {
+      "name": "q3_feature_psi",
+      "displayName": "Q3 · feature drift (PSI)",
+      "queryLines": [
+        "SELECT\n",
+        "    f.feature,\n",
+        "    f.feature_kind,\n",
+        "    f.window_id,\n",
+        "    f.window_index,\n",
+        "    ROUND(f.value, 4)  AS psi,\n",
+        "    f.threshold_amber,\n",
+        "    f.threshold_red,\n",
+        "    f.status\n",
+        "FROM workspace.fraud_poc.monitoring_feature_drift AS f\n",
+        "WHERE f.statistic = 'psi'\n",
+        "ORDER BY\n",
+        "    CASE f.status WHEN 'RED' THEN 0 WHEN 'AMBER' THEN 1 ELSE 2 END,\n",
+        "    f.value DESC,\n",
+        "    f.window_index\n"
+      ]
+    },
+    {
+      "name": "q3b_missing_rate",
+      "displayName": "Q3b · missing-value rate change",
+      "queryLines": [
+        "SELECT\n",
+        "    f.feature,\n",
+        "    f.window_id,\n",
+        "    f.window_index,\n",
+        "    ROUND(f.value, 6) AS missing_rate_delta_vs_reference,\n",
+        "    f.threshold_amber,\n",
+        "    f.threshold_red,\n",
+        "    f.status\n",
+        "FROM workspace.fraud_poc.monitoring_feature_drift AS f\n",
+        "WHERE f.statistic = 'missing_rate_delta'\n",
+        "  AND f.value <> 0\n",
+        "ORDER BY ABS(f.value) DESC, f.window_index\n"
+      ]
+    },
+    {
+      "name": "q4_prediction_drift",
+      "displayName": "Q4 · predicted-positive rate",
+      "queryLines": [
+        "SELECT\n",
+        "    p.window_id,\n",
+        "    p.window_index,\n",
+        "    ROUND(p.predicted_positive_rate * 100, 4)           AS predicted_positive_rate_pct,\n",
+        "    ROUND(p.reference_predicted_positive_rate * 100, 4) AS reference_positive_rate_pct,\n",
+        "    p.predicted_positive_count,\n",
+        "    p.transaction_volume,\n",
+        "    ROUND(p.avg_score, 6)                               AS avg_score,\n",
+        "    ROUND(p.reference_avg_score, 6)                     AS reference_avg_score,\n",
+        "    ROUND(p.p99_score, 6)                               AS p99_score,\n",
+        "    ROUND(p.score_psi, 4)                               AS prediction_score_psi,\n",
+        "    p.status                                            AS prediction_drift_status,\n",
+        "    ROUND(\n",
+        "        p.predicted_positive_rate\n",
+        "        / NULLIF(p.reference_predicted_positive_rate, 0), 3\n",
+        "    )                                                   AS alert_rate_ratio\n",
+        "FROM workspace.fraud_poc.monitoring_prediction_drift AS p\n",
+        "ORDER BY p.window_index\n"
+      ]
+    },
+    {
+      "name": "q5_performance",
+      "displayName": "Q5 · precision and recall",
+      "queryLines": [
+        "SELECT\n",
+        "    w.window_id,\n",
+        "    w.window_index,\n",
+        "    CASE WHEN w.label_available THEN 'LABELLED'\n",
+        "         ELSE 'AWAITING LABELS' END          AS label_status,\n",
+        "    m.n_labeled,\n",
+        "    m.n_positives,\n",
+        "    ROUND(m.prevalence * 100, 4)             AS fraud_prevalence_pct,\n",
+        "    ROUND(m.pr_auc, 4)                       AS pr_auc,\n",
+        "    ROUND(m.reference_pr_auc, 4)             AS reference_pr_auc,\n",
+        "    ROUND(m.pr_auc_delta, 4)                 AS pr_auc_delta,\n",
+        "    ROUND(m.roc_auc, 4)                      AS roc_auc,\n",
+        "    -- `precision` is an ANSI keyword (DOUBLE PRECISION); backtick the column and\n",
+        "    -- give the alias an unambiguous name so this parses under any SQL dialect\n",
+        "    -- setting.\n",
+        "    ROUND(m.`precision`, 4)                  AS precision_at_threshold,\n",
+        "    ROUND(m.recall, 4)                       AS recall_at_threshold,\n",
+        "    ROUND(m.f1, 4)                           AS f1,\n",
+        "    ROUND(m.false_positive_rate, 6)          AS false_positive_rate,\n",
+        "    m.true_positives,\n",
+        "    m.false_positives,\n",
+        "    m.false_negatives,\n",
+        "    ROUND(m.fraud_amount_capture_rate * 100, 2) AS fraud_value_captured_pct,\n",
+        "    m.status                                 AS performance_status\n",
+        "FROM workspace.fraud_poc.monitoring_windows AS w\n",
+        "LEFT JOIN workspace.fraud_poc.monitoring_performance AS m\n",
+        "       ON m.window_id = w.window_id\n",
+        "ORDER BY w.window_index\n"
+      ]
+    },
+    {
+      "name": "q6_rag_indicator",
+      "displayName": "Q6 · red / amber / green indicator",
+      "queryLines": [
+        "WITH feature_status AS (\n",
+        "    SELECT\n",
+        "        window_id,\n",
+        "        MAX(CASE WHEN status = 'RED'   THEN 1 ELSE 0 END) AS any_red,\n",
+        "        MAX(CASE WHEN status = 'AMBER' THEN 1 ELSE 0 END) AS any_amber,\n",
+        "        SUM(CASE WHEN status = 'RED'   THEN 1 ELSE 0 END) AS red_feature_count,\n",
+        "        MAX(CASE WHEN statistic = 'psi' THEN value END)   AS worst_psi\n",
+        "    FROM workspace.fraud_poc.monitoring_feature_drift\n",
+        "    GROUP BY window_id\n",
+        "),\n",
+        "rolled AS (\n",
+        "    SELECT\n",
+        "        w.window_id,\n",
+        "        w.window_index,\n",
+        "        w.start_step,\n",
+        "        w.end_step,\n",
+        "        w.row_count,\n",
+        "        CASE WHEN fs.any_red = 1 THEN 'RED'\n",
+        "             WHEN fs.any_amber = 1 THEN 'AMBER'\n",
+        "             ELSE 'GREEN' END        AS feature_drift_status,\n",
+        "        fs.red_feature_count,\n",
+        "        ROUND(fs.worst_psi, 4)       AS worst_feature_psi,\n",
+        "        COALESCE(p.status, 'GREEN')  AS prediction_drift_status,\n",
+        "        ROUND(p.score_psi, 4)        AS prediction_score_psi,\n",
+        "        CASE WHEN w.label_available THEN COALESCE(perf.status, 'AMBER')\n",
+        "             ELSE 'UNKNOWN' END      AS performance_status,\n",
+        "        ROUND(perf.pr_auc, 4)        AS pr_auc,\n",
+        "        ROUND(perf.pr_auc_delta, 4)  AS pr_auc_delta\n",
+        "    FROM workspace.fraud_poc.monitoring_windows AS w\n",
+        "    LEFT JOIN feature_status                                   AS fs   ON fs.window_id = w.window_id\n",
+        "    LEFT JOIN workspace.fraud_poc.monitoring_prediction_drift  AS p    ON p.window_id  = w.window_id\n",
+        "    LEFT JOIN workspace.fraud_poc.monitoring_performance       AS perf ON perf.window_id = w.window_id\n",
+        ")\n",
+        "SELECT\n",
+        "    *,\n",
+        "    CASE\n",
+        "        WHEN performance_status = 'RED'\n",
+        "          OR feature_drift_status = 'RED'\n",
+        "          OR prediction_drift_status = 'RED' THEN 'RED'\n",
+        "        WHEN performance_status = 'AMBER'\n",
+        "          OR feature_drift_status = 'AMBER'\n",
+        "          OR prediction_drift_status = 'AMBER' THEN 'AMBER'\n",
+        "        ELSE 'GREEN'\n",
+        "    END AS overall_status,\n",
+        "    CASE\n",
+        "        WHEN performance_status IN ('RED', 'AMBER')\n",
+        "            THEN 'Measured performance drop — labels confirm degradation.'\n",
+        "        WHEN performance_status = 'UNKNOWN'\n",
+        "             AND (feature_drift_status <> 'GREEN' OR prediction_drift_status <> 'GREEN')\n",
+        "            THEN 'Inputs and/or scores have shifted, but labels for this window '\n",
+        "                 || 'have not arrived. Degradation is NOT established — investigate, '\n",
+        "                 || 'do not retrain on this signal alone.'\n",
+        "        WHEN feature_drift_status <> 'GREEN' OR prediction_drift_status <> 'GREEN'\n",
+        "            THEN 'Distribution shift with performance still within tolerance. '\n",
+        "                 || 'Monitor; no action required yet.'\n",
+        "        ELSE 'Stable.'\n",
+        "    END AS interpretation\n",
+        "FROM rolled\n",
+        "ORDER BY window_index\n"
+      ]
+    },
+    {
+      "name": "q7_data_quality",
+      "displayName": "Q7 · data-quality summary",
+      "queryLines": [
+        "SELECT\n",
+        "    rule_name,\n",
+        "    severity,\n",
+        "    failed_row_count,\n",
+        "    evaluated_row_count,\n",
+        "    ROUND(failure_rate * 100, 6) AS failure_rate_pct,\n",
+        "    description\n",
+        "FROM workspace.fraud_poc.silver_quality_results\n",
+        "ORDER BY failed_row_count DESC, rule_name\n"
+      ]
+    },
+    {
+      "name": "q8_feature_contract",
+      "displayName": "Q8 · model and feature contract",
+      "queryLines": [
+        "SELECT\n",
+        "    feature_name,\n",
+        "    dtype,\n",
+        "    availability,\n",
+        "    served_to_endpoint,\n",
+        "    signature_position,\n",
+        "    description,\n",
+        "    derivation\n",
+        "FROM workspace.fraud_poc.gold_feature_contract\n",
+        "ORDER BY served_to_endpoint DESC, signature_position, feature_name\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "drift_watch",
+      "displayName": "Drift watch",
+      "layout": [
+        {
+          "widget": {
+            "name": "intro",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Fraud model drift watch\n\nEqual-width `step` windows over the post-training period, each compared against the training reference. The tiles keep three different questions apart — **did the inputs move** (Q3/Q3b), **did the scores move** (Q2/Q4), and **did the model actually get worse** (Q5) — because only the third one justifies a retrain.\n\nEvery query reads the small aggregate tables written by `06_generate_monitoring`, never the 6.3 M-row Gold table."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "q6_rollup",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q6_rag_indicator",
+                  "fields": [
+                    {
+                      "name": "window_id",
+                      "expression": "`window_id`"
+                    },
+                    {
+                      "name": "overall_status",
+                      "expression": "`overall_status`"
+                    },
+                    {
+                      "name": "feature_drift_status",
+                      "expression": "`feature_drift_status`"
+                    },
+                    {
+                      "name": "prediction_drift_status",
+                      "expression": "`prediction_drift_status`"
+                    },
+                    {
+                      "name": "performance_status",
+                      "expression": "`performance_status`"
+                    },
+                    {
+                      "name": "worst_feature_psi",
+                      "expression": "`worst_feature_psi`"
+                    },
+                    {
+                      "name": "prediction_score_psi",
+                      "expression": "`prediction_score_psi`"
+                    },
+                    {
+                      "name": "pr_auc",
+                      "expression": "`pr_auc`"
+                    },
+                    {
+                      "name": "pr_auc_delta",
+                      "expression": "`pr_auc_delta`"
+                    },
+                    {
+                      "name": "row_count",
+                      "expression": "`row_count`"
+                    },
+                    {
+                      "name": "interpretation",
+                      "expression": "`interpretation`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "window_id",
+                    "displayName": "Window",
+                    "type": "string",
+                    "order": 0,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "overall_status",
+                    "displayName": "Overall",
+                    "type": "string",
+                    "order": 1,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "feature_drift_status",
+                    "displayName": "Features",
+                    "type": "string",
+                    "order": 2,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "prediction_drift_status",
+                    "displayName": "Scores",
+                    "type": "string",
+                    "order": 3,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "performance_status",
+                    "displayName": "Performance",
+                    "type": "string",
+                    "order": 4,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "worst_feature_psi",
+                    "displayName": "Worst feature PSI",
+                    "type": "float",
+                    "order": 5,
+                    "visible": true,
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "0.25"
+                            },
+                            "operator": ">="
+                          },
+                          "backgroundColor": {
+                            "hex": "#d13212"
+                          }
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "0.1"
+                            },
+                            "operator": ">="
+                          },
+                          "backgroundColor": {
+                            "hex": "#e8a33d"
+                          }
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "0.0"
+                            },
+                            "operator": ">="
+                          },
+                          "backgroundColor": {
+                            "hex": "#1d8102"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "prediction_score_psi",
+                    "displayName": "Score PSI",
+                    "type": "float",
+                    "order": 6,
+                    "visible": true,
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "0.25"
+                            },
+                            "operator": ">="
+                          },
+                          "backgroundColor": {
+                            "hex": "#d13212"
+                          }
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "0.1"
+                            },
+                            "operator": ">="
+                          },
+                          "backgroundColor": {
+                            "hex": "#e8a33d"
+                          }
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "0.0"
+                            },
+                            "operator": ">="
+                          },
+                          "backgroundColor": {
+                            "hex": "#1d8102"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "pr_auc",
+                    "displayName": "PR-AUC",
+                    "type": "float",
+                    "order": 7,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "pr_auc_delta",
+                    "displayName": "Δ PR-AUC",
+                    "type": "float",
+                    "order": 8,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "row_count",
+                    "displayName": "Rows",
+                    "type": "integer",
+                    "order": 9,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "interpretation",
+                    "displayName": "Interpretation",
+                    "type": "string",
+                    "order": 10,
+                    "visible": true
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Window verdicts",
+                "description": "Worst-of the three families, each family's own verdict kept visible.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 12,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "rollup_note",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### Reading the rollup\n`overall_status` is worst-of the three families. **Performance reads `UNKNOWN` on the most recent windows by design** — fraud labels arrive with chargebacks and investigations, days to weeks late. A missing window would read as \"fine\"; `UNKNOWN` reads as \"not yet knowable\".\n\nDrift red + performance unknown is *investigate*, not *retrain*."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "q1_volume_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q1_volume",
+                  "fields": [
+                    {
+                      "name": "window_id",
+                      "expression": "`window_id`"
+                    },
+                    {
+                      "name": "transaction_volume",
+                      "expression": "`transaction_volume`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "window_id",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Window"
+                },
+                "y": {
+                  "fieldName": "transaction_volume",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Transactions"
+                }
+              },
+              "frame": {
+                "title": "Transactions per window",
+                "description": "The denominator for every other tile. A volume collapse explains an alert-rate change far more often than model decay does.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "q4_alert_rate",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q4_prediction_drift",
+                  "fields": [
+                    {
+                      "name": "window_id",
+                      "expression": "`window_id`"
+                    },
+                    {
+                      "name": "predicted_positive_rate_pct",
+                      "expression": "`predicted_positive_rate_pct`"
+                    },
+                    {
+                      "name": "reference_positive_rate_pct",
+                      "expression": "`reference_positive_rate_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "window_id",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Window"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "% of transactions",
+                  "fields": [
+                    {
+                      "fieldName": "predicted_positive_rate_pct",
+                      "displayName": "Window alert rate %"
+                    },
+                    {
+                      "fieldName": "reference_positive_rate_pct",
+                      "displayName": "Training reference %"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Alert rate vs. training reference",
+                "description": "Share of transactions at or above the operational threshold. A staffing question before it is a modelling question.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 14,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "q5_perf",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q5_performance",
+                  "fields": [
+                    {
+                      "name": "window_id",
+                      "expression": "`window_id`"
+                    },
+                    {
+                      "name": "precision_at_threshold",
+                      "expression": "`precision_at_threshold`"
+                    },
+                    {
+                      "name": "recall_at_threshold",
+                      "expression": "`recall_at_threshold`"
+                    },
+                    {
+                      "name": "pr_auc",
+                      "expression": "`pr_auc`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "window_id",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Window"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Score",
+                  "fields": [
+                    {
+                      "fieldName": "precision_at_threshold",
+                      "displayName": "Precision"
+                    },
+                    {
+                      "fieldName": "recall_at_threshold",
+                      "displayName": "Recall"
+                    },
+                    {
+                      "fieldName": "pr_auc",
+                      "displayName": "PR-AUC"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Precision, recall, PR-AUC",
+                "description": "The only tile that can prove degradation — and it stops where the labels stop. Recent windows are intentionally blank.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "q2_score_bands",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q2_score_histogram",
+                  "fields": [
+                    {
+                      "name": "window_id",
+                      "expression": "`window_id`"
+                    },
+                    {
+                      "name": "score_band",
+                      "expression": "`score_band`"
+                    },
+                    {
+                      "name": "sum(row_share)",
+                      "expression": "SUM(`row_share`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "heatmap",
+              "encodings": {
+                "x": {
+                  "fieldName": "window_id",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  }
+                },
+                "y": {
+                  "fieldName": "score_band",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  }
+                },
+                "color": {
+                  "fieldName": "sum(row_share)",
+                  "scale": {
+                    "type": "quantitative",
+                    "colorRamp": {
+                      "mode": "scheme",
+                      "scheme": "blues"
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "title": "Where the scores sit",
+                "description": "Share of each window's rows per score band. Mass can migrate to the tails while the mean holds steady.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 20,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "q3_psi",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q3_feature_psi",
+                  "fields": [
+                    {
+                      "name": "window_id",
+                      "expression": "`window_id`"
+                    },
+                    {
+                      "name": "feature",
+                      "expression": "`feature`"
+                    },
+                    {
+                      "name": "avg(psi)",
+                      "expression": "AVG(`psi`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "heatmap",
+              "encodings": {
+                "x": {
+                  "fieldName": "window_id",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  }
+                },
+                "y": {
+                  "fieldName": "feature",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  }
+                },
+                "color": {
+                  "fieldName": "avg(psi)",
+                  "scale": {
+                    "type": "quantitative",
+                    "colorRamp": {
+                      "mode": "scheme",
+                      "scheme": "redyellowgreen"
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "title": "Feature drift (PSI) by feature and window",
+                "description": "Which input moved, and when. Under 0.10 stable · 0.10–0.25 moderate · above 0.25 significant.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 26,
+            "width": 12,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "q3b_missing",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q3b_missing_rate",
+                  "fields": [
+                    {
+                      "name": "feature",
+                      "expression": "`feature`"
+                    },
+                    {
+                      "name": "window_id",
+                      "expression": "`window_id`"
+                    },
+                    {
+                      "name": "missing_rate_delta_vs_reference",
+                      "expression": "`missing_rate_delta_vs_reference`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "feature",
+                    "displayName": "Feature",
+                    "type": "string",
+                    "order": 0,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "window_id",
+                    "displayName": "Window",
+                    "type": "string",
+                    "order": 1,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "missing_rate_delta_vs_reference",
+                    "displayName": "Δ missing rate",
+                    "type": "float",
+                    "order": 2,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "status",
+                    "displayName": "Status",
+                    "type": "string",
+                    "order": 3,
+                    "visible": true
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Missing-rate change vs. reference",
+                "description": "Nulls in a served feature are a plumbing failure and move independently of PSI. An empty table is the healthy state.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 34,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "q7_quality",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q7_data_quality",
+                  "fields": [
+                    {
+                      "name": "rule_name",
+                      "expression": "`rule_name`"
+                    },
+                    {
+                      "name": "severity",
+                      "expression": "`severity`"
+                    },
+                    {
+                      "name": "failed_row_count",
+                      "expression": "`failed_row_count`"
+                    },
+                    {
+                      "name": "evaluated_row_count",
+                      "expression": "`evaluated_row_count`"
+                    },
+                    {
+                      "name": "failure_rate_pct",
+                      "expression": "`failure_rate_pct`"
+                    },
+                    {
+                      "name": "description",
+                      "expression": "`description`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "rule_name",
+                    "displayName": "Rule",
+                    "type": "string",
+                    "order": 0,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "severity",
+                    "displayName": "Severity",
+                    "type": "string",
+                    "order": 1,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "failed_row_count",
+                    "displayName": "Failed",
+                    "type": "integer",
+                    "order": 2,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "evaluated_row_count",
+                    "displayName": "Evaluated",
+                    "type": "integer",
+                    "order": 3,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "failure_rate_pct",
+                    "displayName": "Failure %",
+                    "type": "float",
+                    "order": 4,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "description",
+                    "displayName": "Why it exists",
+                    "type": "string",
+                    "order": 5,
+                    "visible": true
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Bronze → Silver data quality",
+                "description": "Proves the ingest contract held for this run. Reviewers ask for this before they trust any metric above it.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 34,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "q8_contract",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "q8_feature_contract",
+                  "fields": [
+                    {
+                      "name": "signature_position",
+                      "expression": "`signature_position`"
+                    },
+                    {
+                      "name": "feature_name",
+                      "expression": "`feature_name`"
+                    },
+                    {
+                      "name": "dtype",
+                      "expression": "`dtype`"
+                    },
+                    {
+                      "name": "availability",
+                      "expression": "`availability`"
+                    },
+                    {
+                      "name": "served_to_endpoint",
+                      "expression": "`served_to_endpoint`"
+                    },
+                    {
+                      "name": "derivation",
+                      "expression": "`derivation`"
+                    },
+                    {
+                      "name": "description",
+                      "expression": "`description`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "signature_position",
+                    "displayName": "#",
+                    "type": "integer",
+                    "order": 0,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "feature_name",
+                    "displayName": "Column",
+                    "type": "string",
+                    "order": 1,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "dtype",
+                    "displayName": "Type",
+                    "type": "string",
+                    "order": 2,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "availability",
+                    "displayName": "Availability",
+                    "type": "string",
+                    "order": 3,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "served_to_endpoint",
+                    "displayName": "Served",
+                    "type": "boolean",
+                    "order": 4,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "derivation",
+                    "displayName": "Derivation",
+                    "type": "string",
+                    "order": 5,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "description",
+                    "displayName": "Description",
+                    "type": "string",
+                    "order": 6,
+                    "visible": true
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Model and feature contract",
+                "description": "What the endpoint may see, in signature order — and which Gold columns are withheld, so the leakage decisions stay auditable.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 40,
+            "width": 12,
+            "height": 8
+          }
+        }
+      ]
+    }
+  ]
+}

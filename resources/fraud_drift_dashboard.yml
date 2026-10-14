@@ -1,0 +1,25 @@
+# Lakeview dashboard, deployed with the bundle.
+#
+# The JSON is GENERATED from sql/07_drift_dashboard.sql by
+# dashboards/build_lvdash.py -- edit the SQL, rerun the generator, redeploy.
+# Editing the JSON by hand will be overwritten on the next generator run.
+#
+# A dashboard needs a warehouse to run its queries against. Free Edition
+# provisions a serverless starter warehouse; pass its id at deploy time rather
+# than committing a workspace-specific value:
+#
+#   databricks bundle deploy -t dev --var="warehouse_id=<id>"
+#
+# `databricks warehouses list` prints the ids.
+
+resources:
+  dashboards:
+    fraud_drift_monitoring:
+      display_name: PaySim fraud — drift watch
+      file_path: ../dashboards/fraud_drift_monitoring.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+
+      # Redeploying overwrites edits made in the UI. That is the intended
+      # direction of travel: the SQL file is the source of truth, so a tile
+      # someone tweaked in the browser is a change that was never reviewed.
+      embed_credentials: false

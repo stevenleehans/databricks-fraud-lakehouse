@@ -1,0 +1,161 @@
+# Job definition for the ETL + training pipeline.
+#
+# Tasks run in sequence because each medallion layer depends on the previous
+# one. No cluster is declared: on Free Edition (serverless-only) notebook tasks
+# are scheduled on serverless compute automatically. Adding `new_cluster` here
+# will fail on that edition.
+#
+# Deliberately excluded from this graph:
+#   05_deploy_and_test_endpoint — creating a serving endpoint consumes quota and
+#   takes several minutes. Run it manually once ETL and training are green.
+#   Adding it to a scheduled job risks silently burning the endpoint quota.
+
+resources:
+  jobs:
+    fraud_pipeline:
+      name: paysim-fraud-lakehouse-pipeline
+      description: >-
+        PaySim fraud detection PoC: Bronze -> Silver -> Gold -> train/register
+        -> drift monitoring -> business impact simulation -> operational
+        replay. Educational MVP, not a production pipeline.
+
+      tags:
+        project: paysim-fraud-lakehouse-poc
+        purpose: educational-mvp
+
+      # Free Edition concurrency is limited; one run at a time avoids two runs
+      # overwriting the same Delta tables.
+      max_concurrent_runs: 1
+
+      email_notifications:
+        no_alert_for_skipped_runs: true
+
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: volume
+          default: ${var.volume}
+        - name: input_path
+          default: ${var.input_path}
+        # Business assumptions for the impact simulation (task
+        # fraud_impact_simulation). Overridable per run without editing code,
+        # which is the point: they are the numbers stakeholders argue about.
+        - name: impact_prevention_rate
+          default: ${var.impact_prevention_rate}
+        - name: impact_cost_per_review
+          default: ${var.impact_cost_per_review}
+        - name: impact_customer_friction_cost
+          default: ${var.impact_customer_friction_cost}
+        - name: impact_analyst_daily_capacity
+          default: ${var.impact_analyst_daily_capacity}
+        # Analysts staffed on the alert queue, for the operational replay's
+        # capacity line. Raising it does not change any savings figure -- only
+        # whether the queue fits.
+        - name: ops_analyst_headcount
+          default: ${var.ops_analyst_headcount}
+
+      tasks:
+        - task_key: ingest_bronze
+          description: Read the uploaded PaySim CSV with an explicit schema into Delta.
+          notebook_task:
+            notebook_path: ../src/01_ingest_bronze.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              volume: ${var.volume}
+              input_path: ${var.input_path}
+
+        - task_key: transform_silver
+          description: Validate, deduplicate and conform. Rejected rows are preserved.
+          depends_on:
+            - task_key: ingest_bronze
+          notebook_task:
+            notebook_path: ../src/02_transform_silver.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+
+        - task_key: build_gold
+          description: Pre-transaction feature table plus the chronological split labels.
+          depends_on:
+            - task_key: transform_silver
+          notebook_task:
+            notebook_path: ../src/03_build_gold_features.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+
+        - task_key: train_register
+          description: Train, evaluate on PR-AUC, register the winner in Unity Catalog.
+          depends_on:
+            - task_key: build_gold
+          notebook_task:
+            notebook_path: ../src/04_train_register_model.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+          # Training on the full PaySim sample takes a few minutes; the timeout
+          # catches a hung serverless session rather than letting it idle.
+          timeout_seconds: 5400
+
+        - task_key: generate_monitoring
+          description: Batch inference log, drift statistics and performance windows.
+          depends_on:
+            - task_key: train_register
+          notebook_task:
+            notebook_path: ../src/06_generate_monitoring.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+          timeout_seconds: 5400
+
+        - task_key: fraud_impact_simulation
+          description: >-
+            Convert the model's scores into simulated fraud-loss prevention:
+            threshold sweep, review workload and net savings. Estimates under
+            stated assumptions, never confirmed savings.
+          # The real data dependency is `scored_predictions`, written by
+          # train_register. It hangs off generate_monitoring instead so the
+          # graph stays strictly sequential -- Free Edition concurrency is
+          # limited, and two tasks writing Delta tables at once is not worth
+          # the minute it would save.
+          depends_on:
+            - task_key: generate_monitoring
+          notebook_task:
+            notebook_path: ../src/08_fraud_impact_simulation.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              impact_prevention_rate: ${var.impact_prevention_rate}
+              impact_cost_per_review: ${var.impact_cost_per_review}
+              impact_customer_friction_cost: ${var.impact_customer_friction_cost}
+              impact_analyst_daily_capacity: ${var.impact_analyst_daily_capacity}
+          # Two small aggregations over the scored table -- minutes, not tens
+          # of minutes. A longer run means the split filter is not applying.
+          timeout_seconds: 1800
+
+        - task_key: fraud_operations_replay
+          description: >-
+            Replay the model at one frozen threshold over the post-training
+            period: fraud caught, money saved and queue cost, hour by hour,
+            against staffed review capacity. A simulation, not a production
+            record.
+          # Depends on fraud_impact_simulation, not just on the scores: the
+          # replay's frozen threshold is the one that task recommends. It still
+          # runs if that table is absent -- it falls back to the validation
+          # threshold from notebook 04 and says which it used.
+          depends_on:
+            - task_key: fraud_impact_simulation
+          notebook_task:
+            notebook_path: ../src/10_fraud_operations_timeseries.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              impact_prevention_rate: ${var.impact_prevention_rate}
+              impact_cost_per_review: ${var.impact_cost_per_review}
+              impact_customer_friction_cost: ${var.impact_customer_friction_cost}
+              impact_analyst_daily_capacity: ${var.impact_analyst_daily_capacity}
+              ops_analyst_headcount: ${var.ops_analyst_headcount}
+          timeout_seconds: 1800

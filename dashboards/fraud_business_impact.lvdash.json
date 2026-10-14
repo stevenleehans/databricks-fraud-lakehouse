@@ -1,0 +1,988 @@
+{
+  "datasets": [
+    {
+      "name": "a1_net_savings",
+      "displayName": "A1 · estimated net savings",
+      "queryLines": [
+        "SELECT\n",
+        "    ROUND(estimated_net_savings, 0)   AS estimated_net_savings,\n",
+        "    currency,\n",
+        "    recommended_threshold,\n",
+        "    'SIMULATED ESTIMATE — not a confirmed saving' AS caveat\n",
+        "FROM workspace.fraud_poc.gold_fraud_business_impact_summary\n"
+      ]
+    },
+    {
+      "name": "a2_kpi_tiles",
+      "displayName": "A2 · executive KPI tiles",
+      "queryLines": [
+        "SELECT\n",
+        "    t.display_order,\n",
+        "    t.metric,\n",
+        "    t.value,\n",
+        "    t.unit,\n",
+        "    s.currency,\n",
+        "    s.recommended_threshold\n",
+        "FROM workspace.fraud_poc.gold_fraud_business_impact_summary AS s\n",
+        "LATERAL VIEW EXPLODE(ARRAY(\n",
+        "    STRUCT(1 AS display_order, 'Estimated net savings'          AS metric, ROUND(s.estimated_net_savings, 0)          AS value, 'money' AS unit),\n",
+        "    STRUCT(2 AS display_order, 'Gross estimated fraud prevented' AS metric, ROUND(s.gross_estimated_savings, 0)        AS value, 'money' AS unit),\n",
+        "    STRUCT(3 AS display_order, 'Fraud amount detected'           AS metric, ROUND(s.detected_fraud_amount, 0)          AS value, 'money' AS unit),\n",
+        "    STRUCT(4 AS display_order, 'Fraud amount missed'             AS metric, ROUND(s.missed_fraud_amount, 0)            AS value, 'money' AS unit),\n",
+        "    STRUCT(5 AS display_order, 'Transactions flagged for review' AS metric, CAST(s.flagged_transaction_count AS DOUBLE) AS value, 'count' AS unit),\n",
+        "    STRUCT(6 AS display_order, 'Recommended threshold'           AS metric, s.recommended_threshold                    AS value, 'score' AS unit)\n",
+        ")) AS t\n",
+        "ORDER BY t.display_order\n"
+      ]
+    },
+    {
+      "name": "a3_assumptions",
+      "displayName": "A3 · assumptions in force",
+      "queryLines": [
+        "SELECT\n",
+        "    'Prevention rate (share of caught fraud actually recovered)' AS assumption,\n",
+        "    CAST(assumption_prevention_rate AS STRING)                   AS value\n",
+        "FROM workspace.fraud_poc.gold_fraud_business_impact_summary\n",
+        "UNION ALL\n",
+        "SELECT 'Cost per manual review',\n",
+        "       CONCAT(currency, ' ', CAST(assumption_cost_per_review AS STRING))\n",
+        "FROM workspace.fraud_poc.gold_fraud_business_impact_summary\n",
+        "UNION ALL\n",
+        "SELECT 'Customer friction cost per false positive',\n",
+        "       CONCAT(currency, ' ', CAST(assumption_customer_friction_cost AS STRING))\n",
+        "FROM workspace.fraud_poc.gold_fraud_business_impact_summary\n",
+        "UNION ALL\n",
+        "SELECT 'Analyst daily review capacity',\n",
+        "       CAST(assumption_analyst_daily_capacity AS STRING)\n",
+        "FROM workspace.fraud_poc.gold_fraud_business_impact_summary\n",
+        "UNION ALL\n",
+        "SELECT 'Simulated on',\n",
+        "       CONCAT(evaluation_split, ' split of ', source_table,\n",
+        "              ' · model version ', model_version)\n",
+        "FROM workspace.fraud_poc.gold_fraud_business_impact_summary\n"
+      ]
+    },
+    {
+      "name": "b1_threshold_tradeoff",
+      "displayName": "B1 · savings and costs by threshold",
+      "queryLines": [
+        "SELECT\n",
+        "    sim.threshold,\n",
+        "    ROUND(sim.gross_estimated_savings, 0)      AS gross_estimated_savings,\n",
+        "    ROUND(sim.review_cost, 0)                  AS review_cost,\n",
+        "    ROUND(sim.false_positive_friction_cost, 0) AS false_positive_friction_cost,\n",
+        "    ROUND(sim.estimated_net_savings, 0)        AS estimated_net_savings,\n",
+        "    sim.currency,\n",
+        "    CASE WHEN sim.threshold = s.recommended_threshold\n",
+        "         THEN 'RECOMMENDED' ELSE '' END        AS marker\n",
+        "FROM workspace.fraud_poc.gold_fraud_impact_simulation        AS sim\n",
+        "CROSS JOIN workspace.fraud_poc.gold_fraud_business_impact_summary AS s\n",
+        "ORDER BY sim.threshold\n"
+      ]
+    },
+    {
+      "name": "c1_caught_vs_missed",
+      "displayName": "C1 · fraud caught vs missed",
+      "queryLines": [
+        "SELECT\n",
+        "    threshold,\n",
+        "    ROUND(detected_fraud_amount, 0)         AS detected_fraud_amount,\n",
+        "    ROUND(missed_fraud_amount, 0)           AS missed_fraud_amount,\n",
+        "    ROUND(actual_fraud_amount, 0)           AS actual_fraud_amount,\n",
+        "    ROUND(fraud_detection_rate * 100, 2)    AS fraud_value_caught_pct,\n",
+        "    actual_fraud_count,\n",
+        "    currency\n",
+        "FROM workspace.fraud_poc.gold_fraud_impact_simulation\n",
+        "ORDER BY threshold\n"
+      ]
+    },
+    {
+      "name": "d1_review_workload",
+      "displayName": "D1 · review workload",
+      "queryLines": [
+        "SELECT\n",
+        "    threshold,\n",
+        "    flagged_transaction_count,\n",
+        "    ROUND(flagged_transaction_amount, 0)        AS flagged_transaction_amount,\n",
+        "    ROUND(estimated_review_days_required, 2)    AS estimated_review_days_required,\n",
+        "    assumption_analyst_daily_capacity           AS analyst_daily_capacity,\n",
+        "    ROUND(alerts_per_1k_transactions, 2)        AS alerts_per_1k_transactions,\n",
+        "    ROUND(average_saving_per_review, 2)         AS average_saving_per_review,\n",
+        "    currency\n",
+        "FROM workspace.fraud_poc.gold_fraud_impact_simulation\n",
+        "ORDER BY threshold\n"
+      ]
+    },
+    {
+      "name": "e1_quality_vs_value",
+      "displayName": "E1 · model quality vs business value",
+      "queryLines": [
+        "SELECT\n",
+        "    threshold,\n",
+        "    -- `precision` is an ANSI keyword (DOUBLE PRECISION); backtick the column\n",
+        "    -- or the parser reports a baffling syntax error at the next token.\n",
+        "    ROUND(`precision` * 100, 2)             AS precision_pct,\n",
+        "    ROUND(recall * 100, 2)                AS recall_pct,\n",
+        "    ROUND(false_positive_rate * 100, 4)   AS false_positive_rate_pct,\n",
+        "    ROUND(estimated_net_savings, 0)       AS estimated_net_savings,\n",
+        "    true_positive_count,\n",
+        "    false_positive_count,\n",
+        "    false_negative_count,\n",
+        "    currency\n",
+        "FROM workspace.fraud_poc.gold_fraud_impact_simulation\n",
+        "ORDER BY threshold\n"
+      ]
+    },
+    {
+      "name": "f1_recommendation",
+      "displayName": "F1 · business recommendation",
+      "queryLines": [
+        "SELECT\n",
+        "    recommended_threshold,\n",
+        "    recommendation_note,\n",
+        "    selection_basis,\n",
+        "    business_override_note,\n",
+        "    result_disclaimer,\n",
+        "    ROUND(estimated_net_savings, 0)           AS estimated_net_savings,\n",
+        "    ROUND(estimated_review_days_required, 2)  AS estimated_review_days_required,\n",
+        "    ROUND(`precision` * 100, 2)                 AS precision_pct,\n",
+        "    ROUND(recall * 100, 2)                    AS recall_pct,\n",
+        "    currency,\n",
+        "    simulated_at\n",
+        "FROM workspace.fraud_poc.gold_fraud_business_impact_summary\n"
+      ]
+    },
+    {
+      "name": "f2_neighbouring",
+      "displayName": "F2 · neighbouring thresholds",
+      "queryLines": [
+        "SELECT\n",
+        "    sim.threshold,\n",
+        "    CASE WHEN sim.threshold = s.recommended_threshold THEN true ELSE false END\n",
+        "                                                       AS is_recommended,\n",
+        "    ROUND(sim.estimated_net_savings, 0)                AS estimated_net_savings,\n",
+        "    ROUND(100.0 * sim.estimated_net_savings\n",
+        "          / NULLIF(s.estimated_net_savings, 0), 1)     AS pct_of_best_net_savings,\n",
+        "    sim.flagged_transaction_count,\n",
+        "    ROUND(sim.estimated_review_days_required, 2)       AS estimated_review_days_required,\n",
+        "    ROUND(sim.`precision` * 100, 2)                      AS precision_pct,\n",
+        "    ROUND(sim.recall * 100, 2)                         AS recall_pct\n",
+        "FROM workspace.fraud_poc.gold_fraud_impact_simulation             AS sim\n",
+        "CROSS JOIN workspace.fraud_poc.gold_fraud_business_impact_summary AS s\n",
+        "WHERE ABS(sim.threshold - s.recommended_threshold) <= 0.15\n",
+        "ORDER BY sim.threshold\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "business_impact",
+      "displayName": "Business impact",
+      "layout": [
+        {
+          "widget": {
+            "name": "impact_intro",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Fraud loss prevention — simulated business impact\n\nWhat the model would be **worth** if it were used to block or review suspicious transactions, swept across every decision threshold from 0.05 to 0.95.\n\n> ⚠️ **The savings shown are simulated estimates based on historical transaction labels, model predictions, and configurable business assumptions. They should not be interpreted as guaranteed real-world savings without production validation.**\n\nRead the assumptions tile *before* the number beside it: three of the four inputs to every figure on this page are assumed, not measured."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "a1_net_savings_counter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "a1_net_savings",
+                  "fields": [
+                    {
+                      "name": "estimated_net_savings",
+                      "expression": "`estimated_net_savings`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "estimated_net_savings",
+                  "rowNumber": 1,
+                  "displayName": "Estimated net savings"
+                }
+              },
+              "frame": {
+                "title": "Estimated NET savings (simulated)",
+                "description": "Fraud value prevented, minus the cost of reviewing the queue, minus the cost of stopping good customers. The only figure here a finance function would recognise as a benefit.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 4,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "a2_kpi_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "a2_kpi_tiles",
+                  "fields": [
+                    {
+                      "name": "metric",
+                      "expression": "`metric`"
+                    },
+                    {
+                      "name": "value",
+                      "expression": "`value`"
+                    },
+                    {
+                      "name": "unit",
+                      "expression": "`unit`"
+                    },
+                    {
+                      "name": "currency",
+                      "expression": "`currency`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "metric",
+                    "displayName": "Metric",
+                    "type": "string",
+                    "order": 0,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "value",
+                    "displayName": "Value",
+                    "type": "float",
+                    "order": 1,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "unit",
+                    "displayName": "Unit",
+                    "type": "string",
+                    "order": 2,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "currency",
+                    "displayName": "Currency",
+                    "type": "string",
+                    "order": 3,
+                    "visible": true
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Executive summary",
+                "description": "Benefit, then gross, then what was caught — then what was NOT. A page that stops after the first two rows is a sales pitch, not an analysis.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "a3_assumptions_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "a3_assumptions",
+                  "fields": [
+                    {
+                      "name": "assumption",
+                      "expression": "`assumption`"
+                    },
+                    {
+                      "name": "value",
+                      "expression": "`value`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "assumption",
+                    "displayName": "Assumption",
+                    "type": "string",
+                    "order": 0,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "value",
+                    "displayName": "Value",
+                    "type": "string",
+                    "order": 1,
+                    "visible": true
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Assumptions in force",
+                "description": "If one of these looks wrong, stop and fix it before discussing the number above it. Change them in config.py and re-run notebook 08.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "b1_tradeoff_line",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "b1_threshold_tradeoff",
+                  "fields": [
+                    {
+                      "name": "threshold",
+                      "expression": "`threshold`"
+                    },
+                    {
+                      "name": "estimated_net_savings",
+                      "expression": "`estimated_net_savings`"
+                    },
+                    {
+                      "name": "gross_estimated_savings",
+                      "expression": "`gross_estimated_savings`"
+                    },
+                    {
+                      "name": "review_cost",
+                      "expression": "`review_cost`"
+                    },
+                    {
+                      "name": "false_positive_friction_cost",
+                      "expression": "`false_positive_friction_cost`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "threshold",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Decision threshold"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Amount",
+                  "fields": [
+                    {
+                      "fieldName": "estimated_net_savings",
+                      "displayName": "Net savings"
+                    },
+                    {
+                      "fieldName": "gross_estimated_savings",
+                      "displayName": "Gross fraud prevented"
+                    },
+                    {
+                      "fieldName": "review_cost",
+                      "displayName": "Review cost"
+                    },
+                    {
+                      "fieldName": "false_positive_friction_cost",
+                      "displayName": "False-positive friction cost"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Savings and costs across the threshold sweep",
+                "description": "Gross savings fall as the threshold rises (fewer frauds caught) while both costs fall faster at the low end — so net savings peaks in between. A flat peak means the exact threshold barely matters.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 19,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "impact_method",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### How a saving is computed\n`gross = detected_fraud_amount × prevention_rate` · `review_cost = flagged × cost_per_review` · `friction = false_positives × customer_friction_cost` · **`net = gross − review_cost − friction`**\n\nReviews are charged on false positives too — the queue cannot tell them apart until they are worked. Not modelled at all: recovery on missed fraud, the time-value of a blocked payment, churn, and the cost of running the platform. Treating those as zero is more honest than inventing a number for them."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 26,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c1_caught_vs_missed_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "c1_caught_vs_missed",
+                  "fields": [
+                    {
+                      "name": "threshold",
+                      "expression": "`threshold`"
+                    },
+                    {
+                      "name": "detected_fraud_amount",
+                      "expression": "`detected_fraud_amount`"
+                    },
+                    {
+                      "name": "missed_fraud_amount",
+                      "expression": "`missed_fraud_amount`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "threshold",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Decision threshold"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Fraud value",
+                  "fields": [
+                    {
+                      "fieldName": "detected_fraud_amount",
+                      "displayName": "Fraud value caught"
+                    },
+                    {
+                      "fieldName": "missed_fraud_amount",
+                      "displayName": "Fraud value missed"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Fraud value caught vs let through",
+                "description": "Recall, in money. The two always sum to the total fraudulent value. 80 % recall sounds strong until the missing 20 % is the large-value transactions — which a recall number hides and this chart does not.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 29,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "d1_workload_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d1_review_workload",
+                  "fields": [
+                    {
+                      "name": "threshold",
+                      "expression": "`threshold`"
+                    },
+                    {
+                      "name": "flagged_transaction_count",
+                      "expression": "`flagged_transaction_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "threshold",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Decision threshold"
+                },
+                "y": {
+                  "fieldName": "flagged_transaction_count",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Transactions flagged"
+                }
+              },
+              "frame": {
+                "title": "Review queue by threshold",
+                "description": "The constraint that usually decides the operating point in practice. See the days-required tile below before adopting a threshold.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 29,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "d1_review_days",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d1_review_workload",
+                  "fields": [
+                    {
+                      "name": "threshold",
+                      "expression": "`threshold`"
+                    },
+                    {
+                      "name": "estimated_review_days_required",
+                      "expression": "`estimated_review_days_required`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "threshold",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Decision threshold"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Analyst-days",
+                  "fields": [
+                    {
+                      "fieldName": "estimated_review_days_required",
+                      "displayName": "Analyst-days required"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Analyst-days implied by the alert volume",
+                "description": "Alert volume divided by one analyst's daily capacity. A threshold that maximises modelled savings but needs forty analyst-days per batch is not an option, however good it looks above.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 35,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "e1_quality_line",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e1_quality_vs_value",
+                  "fields": [
+                    {
+                      "name": "threshold",
+                      "expression": "`threshold`"
+                    },
+                    {
+                      "name": "precision_pct",
+                      "expression": "`precision_pct`"
+                    },
+                    {
+                      "name": "recall_pct",
+                      "expression": "`recall_pct`"
+                    },
+                    {
+                      "name": "false_positive_rate_pct",
+                      "expression": "`false_positive_rate_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "threshold",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Decision threshold"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Percent",
+                  "fields": [
+                    {
+                      "fieldName": "precision_pct",
+                      "displayName": "Precision %"
+                    },
+                    {
+                      "fieldName": "recall_pct",
+                      "displayName": "Recall %"
+                    },
+                    {
+                      "fieldName": "false_positive_rate_pct",
+                      "displayName": "False-positive rate %"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Model quality across the same sweep",
+                "description": "The bridge between the two dashboards. The threshold that maximises money is rarely the one that maximises F1: a false positive and a true positive are not worth the same amount.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 35,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "f2_neighbouring_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "f2_neighbouring",
+                  "fields": [
+                    {
+                      "name": "threshold",
+                      "expression": "`threshold`"
+                    },
+                    {
+                      "name": "is_recommended",
+                      "expression": "`is_recommended`"
+                    },
+                    {
+                      "name": "estimated_net_savings",
+                      "expression": "`estimated_net_savings`"
+                    },
+                    {
+                      "name": "pct_of_best_net_savings",
+                      "expression": "`pct_of_best_net_savings`"
+                    },
+                    {
+                      "name": "flagged_transaction_count",
+                      "expression": "`flagged_transaction_count`"
+                    },
+                    {
+                      "name": "estimated_review_days_required",
+                      "expression": "`estimated_review_days_required`"
+                    },
+                    {
+                      "name": "precision_pct",
+                      "expression": "`precision_pct`"
+                    },
+                    {
+                      "name": "recall_pct",
+                      "expression": "`recall_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "threshold",
+                    "displayName": "Threshold",
+                    "type": "float",
+                    "order": 0,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "is_recommended",
+                    "displayName": "Recommended",
+                    "type": "boolean",
+                    "order": 1,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "estimated_net_savings",
+                    "displayName": "Net savings",
+                    "type": "float",
+                    "order": 2,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "pct_of_best_net_savings",
+                    "displayName": "% of best",
+                    "type": "float",
+                    "order": 3,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "flagged_transaction_count",
+                    "displayName": "Flagged",
+                    "type": "integer",
+                    "order": 4,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "estimated_review_days_required",
+                    "displayName": "Analyst-days",
+                    "type": "float",
+                    "order": 5,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "precision_pct",
+                    "displayName": "Precision %",
+                    "type": "float",
+                    "order": 6,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "recall_pct",
+                    "displayName": "Recall %",
+                    "type": "float",
+                    "order": 7,
+                    "visible": true
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Neighbouring thresholds — how much does the choice matter?",
+                "description": "Guards against false precision. If two thresholds are worth within a percent of each other, pick on review capacity, not on the optimum.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 41,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "f1_recommendation_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "f1_recommendation",
+                  "fields": [
+                    {
+                      "name": "recommended_threshold",
+                      "expression": "`recommended_threshold`"
+                    },
+                    {
+                      "name": "recommendation_note",
+                      "expression": "`recommendation_note`"
+                    },
+                    {
+                      "name": "selection_basis",
+                      "expression": "`selection_basis`"
+                    },
+                    {
+                      "name": "business_override_note",
+                      "expression": "`business_override_note`"
+                    },
+                    {
+                      "name": "result_disclaimer",
+                      "expression": "`result_disclaimer`"
+                    },
+                    {
+                      "name": "simulated_at",
+                      "expression": "`simulated_at`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "recommended_threshold",
+                    "displayName": "Threshold",
+                    "type": "float",
+                    "order": 0,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "recommendation_note",
+                    "displayName": "Recommendation",
+                    "type": "string",
+                    "order": 1,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "selection_basis",
+                    "displayName": "Chosen by",
+                    "type": "string",
+                    "order": 2,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "business_override_note",
+                    "displayName": "Why you might choose otherwise",
+                    "type": "string",
+                    "order": 3,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "result_disclaimer",
+                    "displayName": "Disclaimer",
+                    "type": "string",
+                    "order": 4,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "simulated_at",
+                    "displayName": "Simulated at",
+                    "type": "string",
+                    "order": 5,
+                    "visible": true
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Business recommendation",
+                "description": "The conclusion, its basis, and the validation caveat in one place — so the page cannot be screenshotted into a slide without them.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 47,
+            "width": 12,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "impact_closing",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### Before quoting any figure above\nThe recommended threshold is simply the row with the highest estimated net savings — a **starting point for a conversation, not a decision**. A real operating point also has to fit the review capacity that actually exists (tile D) and the organisation's tolerance for stopping good customers.\n\nPaySim is a *synthetic* dataset, so the shape of the trade-off is the transferable finding; the dollar amounts are illustrative only."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 51,
+            "width": 12,
+            "height": 3
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+# --- Never commit credentials -------------------------------------------
+.databrickscfg
+.env
+.env.*
+*.pem
+*.key
+kaggle.json
+secrets/
+**/token.txt
+
+# --- Never commit the dataset (470 MB, and it is Kaggle's to distribute) --
+*.csv
+*.csv.gz
+*.zip
+data/
+PS_*_log.csv
+
+# --- Local artefacts ------------------------------------------------------
+artifacts/
+evidence/
+mlruns/
+mlartifacts/
+*.db
+
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# --- Databricks -----------------------------------------------------------
+.databricks/
+bundle/
+.bundle/
+
+# --- Editors / OS ---------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+*.swp
+.ipynb_checkpoints/

@@ -1,0 +1,106 @@
+# Databricks Asset Bundle — OPTIONAL.
+#
+# The primary path for this PoC is running the notebooks interactively in the
+# workspace (see README, "Notebook execution order"). This bundle exists so the
+# same notebooks can be deployed and run as a job without clicking through the
+# UI, and so the pipeline is reproducible from source control.
+#
+# No workspace host, username or token appears here. Authentication comes from
+# your CLI profile or an OAuth session:
+#
+#   databricks bundle validate -t dev -p <your-profile>
+#   databricks bundle deploy   -t dev -p <your-profile>
+#   databricks bundle run fraud_pipeline -t dev -p <your-profile>
+#
+# FREE EDITION NOTES
+#   * Free Edition is serverless-only. The job below therefore declares NO
+#     cluster: notebook tasks fall through to serverless compute automatically.
+#     Adding `new_cluster` or `job_clusters` will fail on this edition.
+#   * Concurrency is limited. The tasks run strictly in sequence, which is what
+#     the medallion dependencies require anyway.
+#   * The job ends with `fraud_impact_simulation` and `fraud_operations_replay`,
+#     which turn the model's scores into simulated fraud-loss prevention figures
+#     and an hour-by-hour operational replay. Both are estimates under the
+#     `impact_*` / `ops_*` assumptions below, never confirmed savings.
+#   * `05_deploy_and_test_endpoint` is deliberately left OUT of the default job
+#     graph — creating a serving endpoint consumes quota and takes minutes, so
+#     it should be a conscious act. Run it as a notebook, or add it to the job
+#     once you have confirmed serving is available on your workspace.
+
+bundle:
+  name: paysim_fraud_lakehouse
+
+include:
+  - resources/*.yml
+
+# Variables let you repoint the pipeline without editing any notebook.
+# Override at deploy time: --var="catalog=main"
+variables:
+  catalog:
+    description: Unity Catalog catalog. Free Edition provisions `workspace`.
+    default: workspace
+  schema:
+    description: Schema holding every Bronze/Silver/Gold/monitoring table.
+    default: fraud_poc
+  volume:
+    description: UC volume where the PaySim CSV is uploaded by hand.
+    default: raw
+  warehouse_id:
+    description: >-
+      SQL warehouse the Lakeview dashboard runs its queries against. Workspace-
+      specific, so it has no default -- pass it at deploy time:
+      --var="warehouse_id=<id>". `databricks warehouses list` prints the ids.
+    default: ""
+  input_path:
+    description: >-
+      Full path to the PaySim CSV. Must already exist -- Free Edition blocks
+      outbound network access, so nothing can download it for you.
+    default: /Volumes/workspace/fraud_poc/raw/paysim/PS_20174392719_1491204439457_log.csv
+
+  # ------------------------------------------------------------------ #
+  # Business assumptions for the fraud loss prevention simulator (task
+  # `fraud_impact_simulation`, src/08_fraud_impact_simulation.py).
+  #
+  # These are ASSUMPTIONS, not measurements: they decide what a prevented
+  # fraud is worth and what a review costs, and therefore they decide the
+  # headline savings figure. They live here so a stakeholder can re-run the
+  # simulation under their own numbers without touching any code:
+  #   databricks bundle run fraud_pipeline -t dev \
+  #     --var="impact_prevention_rate=0.6" --var="impact_cost_per_review=12"
+  # Defaults mirror src/fraud_common/config.py -- change both together.
+  # ------------------------------------------------------------------ #
+  impact_prevention_rate:
+    description: Share of a flagged fraud's value actually recovered (0-1).
+    default: "0.80"
+  impact_cost_per_review:
+    description: Fully-loaded cost of one manual review, charged on every flagged row.
+    default: "5.00"
+  impact_customer_friction_cost:
+    description: Cost of wrongly stopping a genuine customer, charged per false positive.
+    default: "10.00"
+  impact_analyst_daily_capacity:
+    description: Alerts one analyst can clear per working day.
+    default: "200"
+  ops_analyst_headcount:
+    description: >-
+      Analysts staffed on the queue, for the operational replay's capacity line.
+      Affects only whether the alert volume fits, never a savings figure.
+    default: "3"
+
+targets:
+  dev:
+    mode: development     # prefixes resources with your username, pauses schedules
+    default: true
+
+  # Present to show the intended shape of a promoted environment. Not used by
+  # the one-day PoC; `mode: production` requires a service principal and a
+  # non-development run-as identity.
+  prod:
+    mode: production
+    resources:
+      jobs:
+        fraud_pipeline:
+          schedule:
+            quartz_cron_expression: "0 0 3 * * ?"
+            timezone_id: UTC
+            pause_status: PAUSED

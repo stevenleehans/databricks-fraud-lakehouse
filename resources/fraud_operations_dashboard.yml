@@ -1,0 +1,23 @@
+# Lakeview dashboard for the operational replay -- the only page whose x-axis
+# is clock time.
+#
+# Generated from sql/11_fraud_operations_dashboard.sql by
+# dashboards/build_lvdash.py. Edit the SQL, rerun the generator, redeploy;
+# hand-edits to the JSON are overwritten on the next generator run.
+#
+# Shares `warehouse_id` with the other two dashboards, so one deploy-time
+# value covers all three:
+#
+#   databricks bundle deploy -t dev --var="warehouse_id=<id>"
+#
+# Reads the three tables written by the `fraud_operations_replay` job task.
+# Deploying before that task has run succeeds; the tiles report missing tables
+# until it has.
+
+resources:
+  dashboards:
+    fraud_operations_replay:
+      display_name: PaySim fraud — operational replay (simulated)
+      file_path: ../dashboards/fraud_operations_replay.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      embed_credentials: false

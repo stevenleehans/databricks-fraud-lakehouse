@@ -1,0 +1,1167 @@
+{
+  "datasets": [
+    {
+      "name": "t1_since_golive",
+      "displayName": "T1 · since go-live roll-up",
+      "queryLines": [
+        "SELECT\n",
+        "    periods_observed,\n",
+        "    period_grain,\n",
+        "    first_period,\n",
+        "    last_period,\n",
+        "    operating_threshold,\n",
+        "    total_transactions,\n",
+        "    total_alerts,\n",
+        "    total_caught_fraud_count,\n",
+        "    total_missed_fraud_count,\n",
+        "    ROUND(total_detected_fraud_amount, 0) AS fraud_value_caught,\n",
+        "    ROUND(total_missed_fraud_amount, 0)   AS fraud_value_missed,\n",
+        "    ROUND(total_gross_savings, 0)         AS gross_savings,\n",
+        "    ROUND(total_operational_cost, 0)      AS operational_cost,\n",
+        "    ROUND(total_net_savings, 0)           AS net_savings,\n",
+        "    ROUND(savings_to_cost_ratio, 1)       AS savings_per_unit_cost,\n",
+        "    periods_over_capacity,\n",
+        "    ROUND(peak_backlog_count, 0)          AS peak_backlog,\n",
+        "    currency,\n",
+        "    operating_note,\n",
+        "    result_disclaimer\n",
+        "FROM workspace.fraud_poc.gold_fraud_operations_summary\n"
+      ]
+    },
+    {
+      "name": "t2_savings_ratio",
+      "displayName": "T2 · savings per unit of operational cost",
+      "queryLines": [
+        "SELECT\n",
+        "    ROUND(savings_to_cost_ratio, 1)  AS savings_per_unit_cost,\n",
+        "    ROUND(total_gross_savings, 0)    AS gross_savings,\n",
+        "    ROUND(total_operational_cost, 0) AS operational_cost,\n",
+        "    currency\n",
+        "FROM workspace.fraud_poc.gold_fraud_operations_summary\n"
+      ]
+    },
+    {
+      "name": "u1_savings_vs_cost",
+      "displayName": "U1 · savings vs operational cost",
+      "queryLines": [
+        "SELECT\n",
+        "    period_start,\n",
+        "    ROUND(gross_estimated_savings, 0) AS gross_savings,\n",
+        "    ROUND(operational_cost, 0)        AS operational_cost,\n",
+        "    ROUND(estimated_net_savings, 0)   AS net_savings,\n",
+        "    currency\n",
+        "FROM workspace.fraud_poc.gold_fraud_operations_timeseries\n",
+        "ORDER BY period_start\n"
+      ]
+    },
+    {
+      "name": "u2_cumulative",
+      "displayName": "U2 · cumulative net savings",
+      "queryLines": [
+        "SELECT\n",
+        "    period_start,\n",
+        "    period_index,\n",
+        "    ROUND(cumulative_net_savings, 0)         AS cumulative_net_savings,\n",
+        "    ROUND(cumulative_gross_savings, 0)       AS cumulative_gross_savings,\n",
+        "    ROUND(cumulative_operational_cost, 0)    AS cumulative_operational_cost,\n",
+        "    ROUND(cumulative_savings_to_cost_ratio, 2) AS cumulative_savings_per_unit_cost,\n",
+        "    currency\n",
+        "FROM workspace.fraud_poc.gold_fraud_operations_timeseries\n",
+        "ORDER BY period_start\n"
+      ]
+    },
+    {
+      "name": "u3_daily_rollup",
+      "displayName": "U3 · daily roll-up",
+      "queryLines": [
+        "SELECT\n",
+        "    event_date,\n",
+        "    SUM(total_transactions)                  AS transactions,\n",
+        "    SUM(flagged_transaction_count)           AS alerts,\n",
+        "    SUM(caught_fraud_count)                  AS fraud_caught,\n",
+        "    SUM(missed_fraud_count)                  AS fraud_missed,\n",
+        "    ROUND(SUM(detected_fraud_amount), 0)     AS fraud_value_caught,\n",
+        "    ROUND(SUM(gross_estimated_savings), 0)   AS gross_savings,\n",
+        "    ROUND(SUM(operational_cost), 0)          AS operational_cost,\n",
+        "    ROUND(SUM(estimated_net_savings), 0)     AS net_savings,\n",
+        "    ROUND(SUM(gross_estimated_savings) / NULLIF(SUM(operational_cost), 0), 1)\n",
+        "                                             AS savings_per_unit_cost,\n",
+        "    MIN(currency)                            AS currency\n",
+        "FROM workspace.fraud_poc.gold_fraud_operations_timeseries\n",
+        "GROUP BY event_date\n",
+        "ORDER BY event_date\n"
+      ]
+    },
+    {
+      "name": "v1_caught_vs_missed",
+      "displayName": "V1 · fraud caught vs missed (count)",
+      "queryLines": [
+        "SELECT\n",
+        "    period_start,\n",
+        "    caught_fraud_count  AS fraud_caught,\n",
+        "    missed_fraud_count  AS fraud_missed,\n",
+        "    actual_fraud_count  AS fraud_total,\n",
+        "    ROUND(recall * 100, 1) AS recall_pct\n",
+        "FROM workspace.fraud_poc.gold_fraud_operations_timeseries\n",
+        "ORDER BY period_start\n"
+      ]
+    },
+    {
+      "name": "v2_value_caught_vs_missed",
+      "displayName": "V2 · fraud caught vs missed (value)",
+      "queryLines": [
+        "SELECT\n",
+        "    period_start,\n",
+        "    ROUND(detected_fraud_amount, 0) AS fraud_value_caught,\n",
+        "    ROUND(missed_fraud_amount, 0)   AS fraud_value_missed,\n",
+        "    currency\n",
+        "FROM workspace.fraud_poc.gold_fraud_operations_timeseries\n",
+        "ORDER BY period_start\n"
+      ]
+    },
+    {
+      "name": "w1_alerts_vs_capacity",
+      "displayName": "W1 · alerts vs review capacity",
+      "queryLines": [
+        "SELECT\n",
+        "    period_start,\n",
+        "    flagged_transaction_count       AS alerts,\n",
+        "    ROUND(review_capacity, 1)       AS review_capacity,\n",
+        "    ROUND(queue_backlog_count, 0)   AS backlog,\n",
+        "    ROUND(capacity_utilisation * 100, 1) AS capacity_utilisation_pct,\n",
+        "    capacity_exceeded,\n",
+        "    analyst_headcount\n",
+        "FROM workspace.fraud_poc.gold_fraud_operations_timeseries\n",
+        "ORDER BY period_start\n"
+      ]
+    },
+    {
+      "name": "w2_hour_profile",
+      "displayName": "W2 · alert load by hour of day",
+      "queryLines": [
+        "SELECT\n",
+        "    event_hour_of_day,\n",
+        "    ROUND(avg_transactions, 0)            AS avg_transactions,\n",
+        "    ROUND(avg_alerts, 1)                  AS avg_alerts,\n",
+        "    peak_alerts,\n",
+        "    ROUND(review_capacity, 1)             AS review_capacity,\n",
+        "    ROUND(avg_capacity_utilisation * 100, 1) AS avg_capacity_utilisation_pct,\n",
+        "    periods_over_capacity,\n",
+        "    ROUND(avg_fraud_caught, 2)            AS avg_fraud_caught,\n",
+        "    ROUND(avg_net_savings, 0)             AS avg_net_savings\n",
+        "FROM workspace.fraud_poc.gold_fraud_operations_hourly_profile\n",
+        "ORDER BY event_hour_of_day\n"
+      ]
+    },
+    {
+      "name": "x1_quality_over_time",
+      "displayName": "X1 · precision and recall over time",
+      "queryLines": [
+        "SELECT\n",
+        "    period_start,\n",
+        "    ROUND(`precision` * 100, 1)          AS precision_pct,\n",
+        "    ROUND(recall * 100, 1)               AS recall_pct,\n",
+        "    true_positive_count,\n",
+        "    false_positive_count,\n",
+        "    false_negative_count,\n",
+        "    actual_fraud_count\n",
+        "FROM workspace.fraud_poc.gold_fraud_operations_timeseries\n",
+        "WHERE actual_fraud_count > 0\n",
+        "ORDER BY period_start\n"
+      ]
+    },
+    {
+      "name": "x2_worst_periods",
+      "displayName": "X2 · worst operating periods",
+      "queryLines": [
+        "SELECT\n",
+        "    period_start,\n",
+        "    total_transactions,\n",
+        "    flagged_transaction_count      AS alerts,\n",
+        "    caught_fraud_count             AS fraud_caught,\n",
+        "    missed_fraud_count             AS fraud_missed,\n",
+        "    ROUND(missed_fraud_amount, 0)  AS fraud_value_missed,\n",
+        "    ROUND(operational_cost, 0)     AS operational_cost,\n",
+        "    ROUND(estimated_net_savings, 0) AS net_savings,\n",
+        "    ROUND(queue_backlog_count, 0)  AS backlog,\n",
+        "    CASE\n",
+        "        WHEN NOT net_savings_is_positive AND capacity_exceeded\n",
+        "            THEN 'LOSS-MAKING + OVER CAPACITY'\n",
+        "        WHEN NOT net_savings_is_positive THEN 'LOSS-MAKING'\n",
+        "        WHEN capacity_exceeded           THEN 'OVER CAPACITY'\n",
+        "        ELSE 'FRAUD MISSED'\n",
+        "    END                            AS issue\n",
+        "FROM workspace.fraud_poc.gold_fraud_operations_timeseries\n",
+        "WHERE NOT net_savings_is_positive\n",
+        "   OR capacity_exceeded\n",
+        "   OR missed_fraud_count > 0\n",
+        "ORDER BY estimated_net_savings ASC, missed_fraud_amount DESC\n",
+        "LIMIT 50\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "operational_replay",
+      "displayName": "Operational replay",
+      "layout": [
+        {
+          "widget": {
+            "name": "ops_intro",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Fraud detection in operation — a replay\n\nThe model at **one frozen threshold**, hour by hour, as if it had been shipped: how many frauds it caught, what that saved, and what the alert queue cost to work.\n\n> ⚠️ **Two caveats that change how every tile is read.** The dates are **synthetic** — PaySim ships only an hour counter, anchored to 2024-01-01 so a chart can have a time axis. And this is a **replay, not a production record**: the model is applied to transactions it did not influence, so no fraudster ever adapted to it and no analyst ever worked a queue.\n\n> The savings are simulated estimates under configurable business assumptions. They should not be interpreted as guaranteed real-world savings without production validation."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "t2_ratio_counter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "t2_savings_ratio",
+                  "fields": [
+                    {
+                      "name": "savings_per_unit_cost",
+                      "expression": "`savings_per_unit_cost`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "savings_per_unit_cost",
+                  "rowNumber": 1,
+                  "displayName": "Return per unit of review spend"
+                }
+              },
+              "frame": {
+                "title": "Gross savings per 1 unit spent reviewing",
+                "description": "Unitless, so it survives a change of currency and compares two operating points fairly. The most quotable number on the page.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 4,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "t1_golive_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "t1_since_golive",
+                  "fields": [
+                    {
+                      "name": "periods_observed",
+                      "expression": "`periods_observed`"
+                    },
+                    {
+                      "name": "operating_threshold",
+                      "expression": "`operating_threshold`"
+                    },
+                    {
+                      "name": "total_alerts",
+                      "expression": "`total_alerts`"
+                    },
+                    {
+                      "name": "total_caught_fraud_count",
+                      "expression": "`total_caught_fraud_count`"
+                    },
+                    {
+                      "name": "total_missed_fraud_count",
+                      "expression": "`total_missed_fraud_count`"
+                    },
+                    {
+                      "name": "gross_savings",
+                      "expression": "`gross_savings`"
+                    },
+                    {
+                      "name": "operational_cost",
+                      "expression": "`operational_cost`"
+                    },
+                    {
+                      "name": "net_savings",
+                      "expression": "`net_savings`"
+                    },
+                    {
+                      "name": "periods_over_capacity",
+                      "expression": "`periods_over_capacity`"
+                    },
+                    {
+                      "name": "result_disclaimer",
+                      "expression": "`result_disclaimer`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "periods_observed",
+                    "displayName": "Periods",
+                    "type": "integer",
+                    "order": 0,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "operating_threshold",
+                    "displayName": "Threshold",
+                    "type": "float",
+                    "order": 1,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "total_alerts",
+                    "displayName": "Alerts",
+                    "type": "integer",
+                    "order": 2,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "total_caught_fraud_count",
+                    "displayName": "Fraud caught",
+                    "type": "integer",
+                    "order": 3,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "total_missed_fraud_count",
+                    "displayName": "Fraud missed",
+                    "type": "integer",
+                    "order": 4,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "gross_savings",
+                    "displayName": "Gross savings",
+                    "type": "float",
+                    "order": 5,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "operational_cost",
+                    "displayName": "Operational cost",
+                    "type": "float",
+                    "order": 6,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "net_savings",
+                    "displayName": "Net savings",
+                    "type": "float",
+                    "order": 7,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "periods_over_capacity",
+                    "displayName": "Periods over capacity",
+                    "type": "integer",
+                    "order": 8,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "result_disclaimer",
+                    "displayName": "Disclaimer",
+                    "type": "string",
+                    "order": 9,
+                    "visible": true
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Since go-live",
+                "description": "The operational bottom line for the whole replayed period. Everything below is this row decomposed over time.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 5,
+            "width": 8,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "u2_payback_curve",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "u2_cumulative",
+                  "fields": [
+                    {
+                      "name": "period_start",
+                      "expression": "`period_start`"
+                    },
+                    {
+                      "name": "cumulative_net_savings",
+                      "expression": "`cumulative_net_savings`"
+                    },
+                    {
+                      "name": "cumulative_gross_savings",
+                      "expression": "`cumulative_gross_savings`"
+                    },
+                    {
+                      "name": "cumulative_operational_cost",
+                      "expression": "`cumulative_operational_cost`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "period_start",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Time"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Cumulative amount",
+                  "fields": [
+                    {
+                      "fieldName": "cumulative_net_savings",
+                      "displayName": "Cumulative net savings"
+                    },
+                    {
+                      "fieldName": "cumulative_gross_savings",
+                      "displayName": "Cumulative gross savings"
+                    },
+                    {
+                      "fieldName": "cumulative_operational_cost",
+                      "displayName": "Cumulative operational cost"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "The payback curve",
+                "description": "A rising line means the deployment is compounding; a flat stretch means the model found nothing while the desk kept being paid. If cost ever crosses above savings, the deployment is under water.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "u1_savings_vs_cost",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "u1_savings_vs_cost",
+                  "fields": [
+                    {
+                      "name": "period_start",
+                      "expression": "`period_start`"
+                    },
+                    {
+                      "name": "gross_savings",
+                      "expression": "`gross_savings`"
+                    },
+                    {
+                      "name": "operational_cost",
+                      "expression": "`operational_cost`"
+                    },
+                    {
+                      "name": "net_savings",
+                      "expression": "`net_savings`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "period_start",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Time"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Amount",
+                  "fields": [
+                    {
+                      "fieldName": "gross_savings",
+                      "displayName": "Gross savings"
+                    },
+                    {
+                      "fieldName": "operational_cost",
+                      "displayName": "Operational cost"
+                    },
+                    {
+                      "fieldName": "net_savings",
+                      "displayName": "Net savings"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Savings vs operational cost, period by period",
+                "description": "What the model prevented, and what preventing it cost to operate, on the same clock. The stability of the gap matters more than its size in any one period.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "ops_money_note",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### Why cost is smooth and savings are spiky\nOperational cost tracks alert **volume** — reviews and false-positive friction — so it moves with traffic. Gross savings tracks transaction **value**, and one large fraudulent transfer moves it more than a busy hour of small ones. A spiky benefit line against a flat cost line is the expected shape, not an anomaly.\n\n`operational_cost = review_cost + false_positive_friction_cost` — the same two components the business impact dashboard subtracts. One definition of cost across both pages."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 24,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "u3_daily_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "u3_daily_rollup",
+                  "fields": [
+                    {
+                      "name": "event_date",
+                      "expression": "`event_date`"
+                    },
+                    {
+                      "name": "operational_cost",
+                      "expression": "`operational_cost`"
+                    },
+                    {
+                      "name": "net_savings",
+                      "expression": "`net_savings`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "event_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Date"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Amount",
+                  "fields": [
+                    {
+                      "fieldName": "operational_cost",
+                      "displayName": "Operational cost"
+                    },
+                    {
+                      "fieldName": "net_savings",
+                      "displayName": "Net savings"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Daily roll-up — cost and benefit",
+                "description": "The two segments sum to gross savings. Same data as the hourly series, aggregated — the version that goes on a slide without an argument about noise.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 27,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "w1_capacity",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "w1_alerts_vs_capacity",
+                  "fields": [
+                    {
+                      "name": "period_start",
+                      "expression": "`period_start`"
+                    },
+                    {
+                      "name": "alerts",
+                      "expression": "`alerts`"
+                    },
+                    {
+                      "name": "review_capacity",
+                      "expression": "`review_capacity`"
+                    },
+                    {
+                      "name": "backlog",
+                      "expression": "`backlog`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "period_start",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Time"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Alerts",
+                  "fields": [
+                    {
+                      "fieldName": "alerts",
+                      "displayName": "Alerts raised"
+                    },
+                    {
+                      "fieldName": "review_capacity",
+                      "displayName": "Staffed review capacity"
+                    },
+                    {
+                      "fieldName": "backlog",
+                      "displayName": "Backlog"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Alert volume against staffed capacity",
+                "description": "Alerts above the capacity line become a backlog. This tile decides headcount, and no model metric can answer it.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 27,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "v1_counts",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "v1_caught_vs_missed",
+                  "fields": [
+                    {
+                      "name": "period_start",
+                      "expression": "`period_start`"
+                    },
+                    {
+                      "name": "fraud_caught",
+                      "expression": "`fraud_caught`"
+                    },
+                    {
+                      "name": "fraud_missed",
+                      "expression": "`fraud_missed`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "period_start",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Time"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Transactions",
+                  "fields": [
+                    {
+                      "fieldName": "fraud_caught",
+                      "displayName": "Fraud caught"
+                    },
+                    {
+                      "fieldName": "fraud_missed",
+                      "displayName": "Fraud missed"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Fraud caught vs missed — count",
+                "description": "Recall as a running record. A recall figure is a number; a bar that turns in one specific hour is an incident someone can investigate.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 33,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "v2_value",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "v2_value_caught_vs_missed",
+                  "fields": [
+                    {
+                      "name": "period_start",
+                      "expression": "`period_start`"
+                    },
+                    {
+                      "name": "fraud_value_caught",
+                      "expression": "`fraud_value_caught`"
+                    },
+                    {
+                      "name": "fraud_value_missed",
+                      "expression": "`fraud_value_missed`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "period_start",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Time"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Fraud value",
+                  "fields": [
+                    {
+                      "fieldName": "fraud_value_caught",
+                      "displayName": "Fraud value caught"
+                    },
+                    {
+                      "fieldName": "fraud_value_missed",
+                      "displayName": "Fraud value missed"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Fraud caught vs missed — value",
+                "description": "The same picture weighted by money. A period where the counts look fine and this does not is a period that missed the expensive ones.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 33,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "w2_hour_profile",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "w2_hour_profile",
+                  "fields": [
+                    {
+                      "name": "event_hour_of_day",
+                      "expression": "`event_hour_of_day`"
+                    },
+                    {
+                      "name": "avg_alerts",
+                      "expression": "`avg_alerts`"
+                    },
+                    {
+                      "name": "review_capacity",
+                      "expression": "`review_capacity`"
+                    },
+                    {
+                      "name": "peak_alerts",
+                      "expression": "`peak_alerts`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "event_hour_of_day",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Hour of day"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Alerts",
+                  "fields": [
+                    {
+                      "fieldName": "avg_alerts",
+                      "displayName": "Average alerts"
+                    },
+                    {
+                      "fieldName": "review_capacity",
+                      "displayName": "Staffed capacity"
+                    },
+                    {
+                      "fieldName": "peak_alerts",
+                      "displayName": "Peak alerts"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Alert load by hour of day",
+                "description": "Shift planning. Fraud is not uniform across the clock, so neither is the queue — this is the tile that answers \"do we need a night shift?\".",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 39,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "x1_quality",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "x1_quality_over_time",
+                  "fields": [
+                    {
+                      "name": "period_start",
+                      "expression": "`period_start`"
+                    },
+                    {
+                      "name": "precision_pct",
+                      "expression": "`precision_pct`"
+                    },
+                    {
+                      "name": "recall_pct",
+                      "expression": "`recall_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "period_start",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Time"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Percent",
+                  "fields": [
+                    {
+                      "fieldName": "precision_pct",
+                      "displayName": "Precision %"
+                    },
+                    {
+                      "fieldName": "recall_pct",
+                      "displayName": "Recall %"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "title": "Detection quality over time",
+                "description": "Noisy on low-volume periods by construction: a period with two frauds has a recall of 0, 50 or 100 % and nothing in between. Periods with no fraud at all are excluded rather than plotted as zero.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 39,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "ops_capacity_note",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### The constraint that model metrics cannot see\nAlerts above the capacity line do not disappear — they become a backlog. A fraud desk usually fails by being **behind**, not by being wrong, and no amount of PR-AUC answers whether a night shift is needed. Capacity here is `analysts × daily capacity`, scaled to the period grain."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 45,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "x2_worst_periods",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "x2_worst_periods",
+                  "fields": [
+                    {
+                      "name": "period_start",
+                      "expression": "`period_start`"
+                    },
+                    {
+                      "name": "issue",
+                      "expression": "`issue`"
+                    },
+                    {
+                      "name": "alerts",
+                      "expression": "`alerts`"
+                    },
+                    {
+                      "name": "fraud_caught",
+                      "expression": "`fraud_caught`"
+                    },
+                    {
+                      "name": "fraud_missed",
+                      "expression": "`fraud_missed`"
+                    },
+                    {
+                      "name": "fraud_value_missed",
+                      "expression": "`fraud_value_missed`"
+                    },
+                    {
+                      "name": "operational_cost",
+                      "expression": "`operational_cost`"
+                    },
+                    {
+                      "name": "net_savings",
+                      "expression": "`net_savings`"
+                    },
+                    {
+                      "name": "backlog",
+                      "expression": "`backlog`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "period_start",
+                    "displayName": "Period",
+                    "type": "datetime",
+                    "order": 0,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "issue",
+                    "displayName": "Issue",
+                    "type": "string",
+                    "order": 1,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "alerts",
+                    "displayName": "Alerts",
+                    "type": "integer",
+                    "order": 2,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "fraud_caught",
+                    "displayName": "Caught",
+                    "type": "integer",
+                    "order": 3,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "fraud_missed",
+                    "displayName": "Missed",
+                    "type": "integer",
+                    "order": 4,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "fraud_value_missed",
+                    "displayName": "Value missed",
+                    "type": "float",
+                    "order": 5,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "operational_cost",
+                    "displayName": "Operational cost",
+                    "type": "float",
+                    "order": 6,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "net_savings",
+                    "displayName": "Net savings",
+                    "type": "float",
+                    "order": 7,
+                    "visible": true
+                  },
+                  {
+                    "fieldName": "backlog",
+                    "displayName": "Backlog",
+                    "type": "float",
+                    "order": 8,
+                    "visible": true
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Worst operating periods",
+                "description": "The exceptions view — every period that lost money, missed fraud, or overflowed the queue. An empty table is the healthy state.",
+                "showTitle": true,
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 48,
+            "width": 12,
+            "height": 7
+          }
+        }
+      ]
+    }
+  ]
+}

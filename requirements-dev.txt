@@ -1,0 +1,25 @@
+# Local development and test dependencies.
+#
+# These are for running `pytest` on a laptop. You do NOT need them inside
+# Databricks -- the runtime already ships pandas, numpy, scikit-learn, pyspark,
+# mlflow and databricks-sdk, and pinning them there tends to break serving.
+#
+#   python -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements-dev.txt
+#   pytest
+
+pandas>=2.0
+numpy>=1.24
+scikit-learn>=1.3
+
+# Needed only by the model-signature tests. `mlflow-skinny` is enough -- the
+# full `mlflow` package pulls in a tracking server and its dependencies.
+# The tests use pytest.importorskip, so they skip cleanly without it.
+mlflow-skinny>=2.16
+
+pytest>=7.4
+
+# Optional: only if you want to drive Databricks from your laptop rather than
+# from the workspace UI. Not required to run the tests.
+# databricks-sdk>=0.30
+# databricks-cli>=0.220

@@ -1,0 +1,28 @@
+# Lakeview dashboard for the fraud loss prevention simulator.
+#
+# Companion to fraud_drift_dashboard.yml. Same generation rule: the JSON is
+# GENERATED from sql/09_fraud_impact_dashboard.sql by
+# dashboards/build_lvdash.py -- edit the SQL, rerun the generator, redeploy.
+# Editing the JSON by hand will be overwritten on the next generator run.
+#
+# Shares the `warehouse_id` variable with the drift dashboard, so one
+# deploy-time value covers both:
+#
+#   databricks bundle deploy -t dev --var="warehouse_id=<id>"
+#
+# The tiles read `gold_fraud_impact_simulation` (19 rows) and
+# `gold_fraud_business_impact_summary` (1 row), both written by the
+# `fraud_impact_simulation` job task. Deploying before that task has ever run
+# succeeds -- the dashboard simply reports missing tables until it has.
+
+resources:
+  dashboards:
+    fraud_business_impact:
+      display_name: PaySim fraud — business impact (simulated)
+      file_path: ../dashboards/fraud_business_impact.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+
+      # Same direction of travel as the drift dashboard: the SQL file is the
+      # source of truth, so a tile someone tweaked in the browser is a change
+      # that was never reviewed.
+      embed_credentials: false
